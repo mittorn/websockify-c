@@ -51,6 +51,7 @@ typedef struct {
     char      *cout_buf;
     char      *tin_buf;
     char      *tout_buf;
+    struct sockaddr_in udpaddr;
 } ws_ctx_t;
 
 typedef struct {

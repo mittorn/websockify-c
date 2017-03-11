@@ -119,7 +119,7 @@ void do_proxy(ws_ctx_t *ws_ctx, int target) {
 
         if (FD_ISSET(target, &wlist)) {
             len = tout_end-tout_start;
-            bytes = send(target, ws_ctx->tout_buf + tout_start, len, 0);
+            bytes = sendto(target, ws_ctx->tout_buf + tout_start, len, 0, &ws_ctx->udpaddr, sizeof(ws_ctx->udpaddr));
             if (pipe_error) { break; }
             if (bytes < 0) {
                 handler_emsg("target connection error: %s\n",
@@ -221,6 +221,7 @@ void do_proxy(ws_ctx_t *ws_ctx, int target) {
             }
             printf("\n");
             */
+
             if (len < 0) {
                 handler_emsg("decoding error\n");
                 break;
@@ -242,7 +243,9 @@ void do_proxy(ws_ctx_t *ws_ctx, int target) {
 
 void proxy_handler(ws_ctx_t *ws_ctx) {
     int tsock = 0;
-    struct sockaddr_in taddr;
+    struct sockaddr_in taddr = {0};
+    struct sockaddr_in	addr = {0};
+    
 
     if (target_ports != NULL) {
         if (sscanf(ws_ctx->headers->path, settings.pattern, &target_port) != 1) {
@@ -267,13 +270,13 @@ void proxy_handler(ws_ctx_t *ws_ctx) {
 
     handler_msg("connecting to: %s:%d\n", target_host, target_port);
 
-    tsock = socket(AF_INET, SOCK_STREAM, 0);
+    tsock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (tsock < 0) {
         handler_emsg("Could not create target socket: %s\n",
                      strerror(errno));
         return;
     }
-    bzero((char *) &taddr, sizeof(taddr));
+    //bzero((char *) &taddr, sizeof(taddr));
     taddr.sin_family = AF_INET;
     taddr.sin_port = htons(target_port);
 
@@ -283,12 +286,23 @@ void proxy_handler(ws_ctx_t *ws_ctx) {
                      strerror(errno));
     }
 
-    if (connect(tsock, (struct sockaddr *) &taddr, sizeof(taddr)) < 0) {
+    /*if (connect(tsock, (struct sockaddr *) &taddr, sizeof(taddr)) < 0) {
         handler_emsg("Could not connect to target: %s\n",
                      strerror(errno));
         close(tsock);
         return;
+    }*/
+    addr.sin_addr.s_addr = INADDR_ANY;
+    addr.sin_port = 0;
+    addr.sin_family = AF_INET;
+    if( bind( tsock, (void *)&addr, sizeof( addr ) ) < 0 )
+    {
+        handler_emsg("Could not bind udp socket: %s\n",
+                     strerror(errno));
+        close(tsock);
+        return;
     }
+    ws_ctx->udpaddr = taddr;
 
     if ((settings.verbose) && (! settings.daemon)) {
         printf("%s", traffic_legend);
