@@ -1,5 +1,5 @@
-#include <openssl/ssl.h>
-
+#include <string.h>
+#include <stdlib.h>
 #define BUFSIZE 65536
 #define DBUFSIZE (BUFSIZE * 3) / 4 - 20
 
@@ -40,8 +40,6 @@ typedef struct {
 
 typedef struct {
     int        sockfd;
-    SSL_CTX   *ssl_ctx;
-    SSL       *ssl;
     int        hixie;
     int        hybi;
     headers_t *headers;
@@ -57,9 +55,6 @@ typedef struct {
     int listen_port;
     void (*handler)(ws_ctx_t*);
     int handler_id;
-    char *cert;
-    char *key;
-    int ssl_only;
     int daemon;
     int run_once;
 } settings_t;

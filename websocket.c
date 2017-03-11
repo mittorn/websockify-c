@@ -19,13 +19,10 @@
 #include <netdb.h>
 #include <signal.h> // daemonizing
 #include <fcntl.h>  // daemonizing
-#include <openssl/err.h>
-#include <openssl/ssl.h>
 #include <resolv.h>      /* base64 encode/decode */
-#include <openssl/md5.h> /* md5 hash */
-#include <openssl/sha.h> /* sha1 hash */
 #include "websocket.h"
-
+#include "sha1.h"
+#include "md5.h"
 /*
  * Global state
  *
@@ -83,21 +80,12 @@ int resolve_host(struct in_addr *sin_addr, const char *hostname)
  */
 
 ssize_t ws_recv(ws_ctx_t *ctx, void *buf, size_t len) {
-    if (ctx->ssl) {
-        //handler_msg("SSL recv\n");
-        return SSL_read(ctx->ssl, buf, len);
-    } else {
-        return recv(ctx->sockfd, buf, len, 0);
-    }
+    return recv(ctx->sockfd, buf, len, 0);
+
 }
 
 ssize_t ws_send(ws_ctx_t *ctx, const void *buf, size_t len) {
-    if (ctx->ssl) {
-        //handler_msg("SSL send\n");
-        return SSL_write(ctx->ssl, buf, len);
-    } else {
-        return send(ctx->sockfd, buf, len, 0);
-    }
+    return send(ctx->sockfd, buf, len, 0);
 }
 
 ws_ctx_t *alloc_ws_ctx() {
@@ -115,8 +103,6 @@ ws_ctx_t *alloc_ws_ctx() {
         { fatal("malloc of tout_buf"); }
 
     ctx->headers = malloc(sizeof(headers_t));
-    ctx->ssl = NULL;
-    ctx->ssl_ctx = NULL;
     return ctx;
 }
 
@@ -132,74 +118,7 @@ ws_ctx_t *ws_socket(ws_ctx_t *ctx, int socket) {
     ctx->sockfd = socket;
 }
 
-ws_ctx_t *ws_socket_ssl(ws_ctx_t *ctx, int socket, char * certfile, char * keyfile) {
-    int ret;
-    char msg[1024];
-    char * use_keyfile;
-    ws_socket(ctx, socket);
-
-    if (keyfile && (keyfile[0] != '\0')) {
-        // Separate key file
-        use_keyfile = keyfile;
-    } else {
-        // Combined key and cert file
-        use_keyfile = certfile;
-    }
-
-    // Initialize the library
-    if (! ssl_initialized) {
-        SSL_library_init();
-        OpenSSL_add_all_algorithms();
-        SSL_load_error_strings();
-        ssl_initialized = 1;
-
-    }
-
-    ctx->ssl_ctx = SSL_CTX_new(TLSv1_server_method());
-    if (ctx->ssl_ctx == NULL) {
-        ERR_print_errors_fp(stderr);
-        fatal("Failed to configure SSL context");
-    }
-
-    if (SSL_CTX_use_PrivateKey_file(ctx->ssl_ctx, use_keyfile,
-                                    SSL_FILETYPE_PEM) <= 0) {
-        sprintf(msg, "Unable to load private key file %s\n", use_keyfile);
-        fatal(msg);
-    }
-
-    if (SSL_CTX_use_certificate_file(ctx->ssl_ctx, certfile,
-                                     SSL_FILETYPE_PEM) <= 0) {
-        sprintf(msg, "Unable to load certificate file %s\n", certfile);
-        fatal(msg);
-    }
-
-//    if (SSL_CTX_set_cipher_list(ctx->ssl_ctx, "DEFAULT") != 1) {
-//        sprintf(msg, "Unable to set cipher\n");
-//        fatal(msg);
-//    }
-
-    // Associate socket and ssl object
-    ctx->ssl = SSL_new(ctx->ssl_ctx);
-    SSL_set_fd(ctx->ssl, socket);
-
-    ret = SSL_accept(ctx->ssl);
-    if (ret < 0) {
-        ERR_print_errors_fp(stderr);
-        return NULL;
-    }
-
-    return ctx;
-}
-
 int ws_socket_free(ws_ctx_t *ctx) {
-    if (ctx->ssl) {
-        SSL_free(ctx->ssl);
-        ctx->ssl = NULL;
-    }
-    if (ctx->ssl_ctx) {
-        SSL_CTX_free(ctx->ssl_ctx);
-        ctx->ssl_ctx = NULL;
-    }
     if (ctx->sockfd) {
         shutdown(ctx->sockfd, SHUT_RDWR);
         close(ctx->sockfd);
@@ -290,7 +209,7 @@ int encode_hybi(u_char const *src, size_t srclength,
         handler_emsg("Sending frames larger than 65535 bytes not supported\n");
         return -1;
         //target[1] = (char) 127;
-        //*(u_long*)&(target[2]) = htonl(b64_sz);
+        // *(u_long*)&(target[2]) = htonl(b64_sz);
         //payload_offset = 10;
     }
 
@@ -391,14 +310,15 @@ int decode_hybi(unsigned char *src, size_t srclength,
 
         // base64 decode the data
         len = b64_pton((const char*)payload, target+target_offset, targsize);
+        if (len < 0) {
+            handler_emsg("Base64 decode error code %d\n%s\n", len, payload);
+            return len;
+        }
 
         // Restore the first character of the next frame
         payload[payload_length] = save_char;
-        if (len < 0) {
-            handler_emsg("Base64 decode error code %d", len);
-            return len;
-        }
         target_offset += len;
+        handler_emsg("decode: %d\n%s\n\n", len, payload);
 
         //printf("    len %d, raw %s\n", len, frame);
     }
@@ -551,14 +471,14 @@ int gen_md5(headers_t *headers, char *target) {
 }
 
 static void gen_sha1(headers_t *headers, char *target) {
-    SHA_CTX c;
-    unsigned char hash[SHA_DIGEST_LENGTH];
+    SHA1_CTX c={0};
+    unsigned char hash[20];
     int r;
 
-    SHA1_Init(&c);
-    SHA1_Update(&c, headers->key1, strlen(headers->key1));
-    SHA1_Update(&c, HYBI_GUID, 36);
-    SHA1_Final(hash, &c);
+    SHA1Init(&c);
+    SHA1Update(&c, headers->key1, strlen(headers->key1));
+    SHA1Update(&c, HYBI_GUID, 36);
+    SHA1Final(hash, &c);
 
     r = b64_ntop(hash, sizeof hash, target, HYBI10_ACCEPTHDRLEN);
     //assert(r == HYBI10_ACCEPTHDRLEN - 1);
@@ -577,25 +497,6 @@ ws_ctx_t *do_handshake(int sock) {
     handshake[len] = 0;
     if (len == 0) {
         handler_msg("ignoring empty handshake\n");
-        return NULL;
-    } else if ((bcmp(handshake, "\x16", 1) == 0) ||
-               (bcmp(handshake, "\x80", 1) == 0)) {
-        // SSL
-        if (!settings.cert) {
-            handler_msg("SSL connection but no cert specified\n");
-            return NULL;
-        } else if (access(settings.cert, R_OK) != 0) {
-            handler_msg("SSL connection but '%s' not found\n",
-                        settings.cert);
-            return NULL;
-        }
-        ws_ctx = alloc_ws_ctx();
-        ws_socket_ssl(ws_ctx, sock, settings.cert, settings.key);
-        if (! ws_ctx) { return NULL; }
-        scheme = "wss";
-        handler_msg("using SSL socket\n");
-    } else if (settings.ssl_only) {
-        handler_msg("non-SSL connection disallowed\n");
         return NULL;
     } else {
         ws_ctx = alloc_ws_ctx();
@@ -643,7 +544,7 @@ ws_ctx_t *do_handshake(int sock) {
     if (ws_ctx->hybi > 0) {
         handler_msg("using protocol HyBi/IETF 6455 %d\n", ws_ctx->hybi);
         gen_sha1(headers, sha1);
-        sprintf(response, SERVER_HANDSHAKE_HYBI, sha1, "base64");
+        sprintf(response, SERVER_HANDSHAKE_HYBI, sha1, "binary");
     } else {
         if (ws_ctx->hixie == 76) {
             handler_msg("using protocol Hixie 76\n");

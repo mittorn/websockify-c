@@ -278,21 +278,12 @@ int main(int argc, char *argv[])
     char *found;
     static struct option long_options[] = {
         {"verbose",    no_argument,       &verbose,    'v'},
-        {"ssl-only",   no_argument,       &ssl_only,    1 },
         {"daemon",     no_argument,       &daemon,     'D'},
         /* ---- */
         {"run-once",   no_argument,       0,           'r'},
-        {"cert",       required_argument, 0,           'c'},
-        {"key",        required_argument, 0,           'k'},
         {0, 0, 0, 0}
     };
 
-    settings.cert = realpath("self.pem", NULL);
-    if (!settings.cert) {
-        /* Make sure it's always set to something */
-        settings.cert = "self.pem";
-    }
-    settings.key = "";
 
     while (1) {
         c = getopt_long (argc, argv, "vDrc:k:",
@@ -315,24 +306,11 @@ int main(int argc, char *argv[])
             case 'r':
                 run_once = 1;
                 break;
-            case 'c':
-                settings.cert = realpath(optarg, NULL);
-                if (! settings.cert) {
-                    usage("No cert file at %s\n", optarg);
-                }
-                break;
-            case 'k':
-                settings.key = realpath(optarg, NULL);
-                if (! settings.key) {
-                    usage("No key file at %s\n", optarg);
-                }
-                break;
             default:
                 usage("");
         }
     }
     settings.verbose      = verbose;
-    settings.ssl_only     = ssl_only;
     settings.daemon       = daemon;
     settings.run_once     = run_once;
 
@@ -362,14 +340,6 @@ int main(int argc, char *argv[])
     }
     if (target_port == 0) {
         usage("Could not parse target port\n");
-    }
-
-    if (ssl_only) {
-        if (access(settings.cert, R_OK) != 0) {
-            usage("SSL only and cert file '%s' not found\n", settings.cert);
-        }
-    } else if (access(settings.cert, R_OK) != 0) {
-        fprintf(stderr, "Warning: '%s' not found\n", settings.cert);
     }
 
     //printf("  verbose: %d\n",   settings.verbose);
