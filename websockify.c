@@ -267,10 +267,17 @@ void proxy_handler(ws_ctx_t *ws_ctx) {
             return;
         }
     }
+    char protocol = 't';
+    char dummy;
+    sscanf(ws_ctx->headers->path+1, "%c%c%[^:]%c%d" , &protocol, &dummy, &target_host, &dummy,&target_port);
 
-    handler_msg("connecting to: %s:%d\n", target_host, target_port);
+    handler_msg("connecting to: %s:%d via %c\n", target_host, target_port, protocol);
 
-    tsock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if( protocol == 'u' )
+        tsock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    else
+        tsock = socket(AF_INET, SOCK_STREAM, 0);
+
     if (tsock < 0) {
         handler_emsg("Could not create target socket: %s\n",
                      strerror(errno));
@@ -286,12 +293,15 @@ void proxy_handler(ws_ctx_t *ws_ctx) {
                      strerror(errno));
     }
 
-    /*if (connect(tsock, (struct sockaddr *) &taddr, sizeof(taddr)) < 0) {
+    if ( protocol == 't' ) {
+    if (connect(tsock, (struct sockaddr *) &taddr, sizeof(taddr)) < 0) {
         handler_emsg("Could not connect to target: %s\n",
                      strerror(errno));
         close(tsock);
         return;
-    }*/
+    }
+    }
+    else {
     addr.sin_addr.s_addr = INADDR_ANY;
     addr.sin_port = 0;
     addr.sin_family = AF_INET;
@@ -303,6 +313,8 @@ void proxy_handler(ws_ctx_t *ws_ctx) {
         return;
     }
     ws_ctx->udpaddr = taddr;
+    ws_ctx->udp = 1;
+    }
 
     if ((settings.verbose) && (! settings.daemon)) {
         printf("%s", traffic_legend);

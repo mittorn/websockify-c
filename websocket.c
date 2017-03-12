@@ -367,7 +367,7 @@ int parse_handshake(ws_ctx_t *ws_ctx, char *handshake) {
     headers->key2[0] = '\0';
     headers->key3[0] = '\0';
     
-    if ((strlen(handshake) < 92) || (bcmp(handshake, "GET ", 4) != 0)) {
+    if ((strlen(handshake) < 92) || (memcmp(handshake, "GET ", 4) != 0)) {
         return 0;
     }
     start = handshake+4;
