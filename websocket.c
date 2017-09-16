@@ -77,11 +77,6 @@ int resolve_host(struct in_addr *sin_addr, const char *hostname)
     return 0; 
 } 
 
-
-/*
- * SSL Wrapper Code
- */
-
 ssize_t ws_recv(ws_ctx_t *ctx, void *buf, size_t len) {
     return recv(ctx->sockfd, buf, len, 0);
 
@@ -343,7 +338,6 @@ int decode_hybi(unsigned char *src, size_t srclength,
         // Restore the first character of the next frame
         payload[payload_length] = save_char;
         target_offset += len;
-        handler_emsg("decode: %d\n%s\n\n", len, payload);
 
         //printf("    len %d, raw %s\n", len, frame);
     }
@@ -607,9 +601,11 @@ ws_ctx_t *do_handshake(int sock) {
 void signal_handler(sig) {
     switch (sig) {
         case SIGHUP:
-            if (settings.whitelist != NULL) {
-              load_whitelist();
-            }
+            if (settings.whitelist_host != NULL )
+              load_whitelist_host();
+
+            if (settings.whitelist_port != NULL )
+              load_whitelist_port();
             break;
         case SIGPIPE: pipe_error = 1; break; // handle inline
         case SIGTERM:

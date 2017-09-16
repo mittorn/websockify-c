@@ -63,7 +63,9 @@ typedef struct {
     int handler_id;
     int daemon;
     int run_once;
-    char *whitelist;
+    char *whitelist_port;
+    char *whitelist_host;
+    
     char *pattern;
     char *pid;
 } settings_t;

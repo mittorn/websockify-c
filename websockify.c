@@ -33,15 +33,13 @@ Traffic Legend:\n\
 ";
 
 char USAGE[] = "Usage: [options] " \
-               "[source_addr:]source_port target_addr{:target_port}\n\n" \
+               "[source_addr:]source_port\n\n" \
                "  --verbose|-v         verbose messages and per frame traffic\n" \
-               "  --daemon|-D          become a daemon (background process)\n" \
-               "  --cert CERT          SSL certificate file\n" \
-               "  --key KEY            SSL key file (if separate from cert)\n" \
-               "  --ssl-only           disallow non-encrypted connections\n" \
-               "  --whitelist|-w LIST  new-line separated target port whitelist file\n" \
-               "                       (target_port is not required only with this option)\n" \
-               "  --pattern|-P         target port request pattern. Default: '/%d'\n" \
+               "  --daemon|-d          become a daemon (background process)\n" \
+               "  --whitelist-hosts|-W LIST  new-line separated target host whitelist file\n" \
+               "  --whitelist-ports|-P LIST  new-line separated target port whitelist file\n" \
+    
+    
                "  --pid|-p             desired path of pid file. Default: '/var/run/websockify.pid'";
 
 #define usage(fmt, args...) \
@@ -54,7 +52,7 @@ char USAGE[] = "Usage: [options] " \
 char target_host[256];
 int target_port;
 int *target_ports;
-
+int *target_hosts;
 extern pipe_error;
 extern settings_t settings;
 
@@ -245,14 +243,12 @@ void proxy_handler(ws_ctx_t *ws_ctx) {
     int tsock = 0;
     struct sockaddr_in taddr = {0};
     struct sockaddr_in	addr = {0};
-    
+    char protocol = 't';
+    char dummy;
+
+    sscanf(ws_ctx->headers->path+1, "%c%c%[^:]%c%d" , &protocol, &dummy, &target_host, &dummy,&target_port);
 
     if (target_ports != NULL) {
-        if (sscanf(ws_ctx->headers->path, settings.pattern, &target_port) != 1) {
-        handler_emsg("Could not match pattern '%s' to request path '%s'\n",
-                     settings.pattern, ws_ctx->headers->path);
-        return;
-        }
         int *p;
         int found = 0;
         for (p = target_ports; *p; p++) {
@@ -267,9 +263,28 @@ void proxy_handler(ws_ctx_t *ws_ctx) {
             return;
         }
     }
-    char protocol = 't';
-    char dummy;
-    sscanf(ws_ctx->headers->path+1, "%c%c%[^:]%c%d" , &protocol, &dummy, &target_host, &dummy,&target_port);
+
+    /* Resolve target address */
+    if (resolve_host(&taddr.sin_addr, target_host) < -1) {
+        handler_emsg("Could not resolve target address: %s\n",
+                     strerror(errno));
+    }
+
+    if (target_hosts != NULL) {
+        int *p;
+        int found = 0;
+        for (p = target_hosts; *p; p++) {
+            if (*p == *((int*)&taddr.sin_addr)) {
+                found = 1;
+                break;
+            }
+        }
+        if (!found) {
+            handler_emsg("Rejecting connection to non-whitelisted host: '%s'\n",
+                         target_host);
+            return;
+        }
+    }
 
     handler_msg("connecting to: %s:%d via %c\n", target_host, target_port, protocol);
 
@@ -286,12 +301,6 @@ void proxy_handler(ws_ctx_t *ws_ctx) {
     //bzero((char *) &taddr, sizeof(taddr));
     taddr.sin_family = AF_INET;
     taddr.sin_port = htons(target_port);
-
-    /* Resolve target address */
-    if (resolve_host(&taddr.sin_addr, target_host) < -1) {
-        handler_emsg("Could not resolve target address: %s\n",
-                     strerror(errno));
-    }
 
     if ( protocol == 't' ) {
     if (connect(tsock, (struct sockaddr *) &taddr, sizeof(taddr)) < 0) {
@@ -326,12 +335,12 @@ void proxy_handler(ws_ctx_t *ws_ctx) {
     close(tsock);
 }
 
-int load_whitelist() {
-  printf("loading port whitelist '%s'\n", settings.whitelist);
-  FILE *whitelist = fopen(settings.whitelist, "r");
+int load_whitelist_port() {
+  printf("loading port whitelist '%s'\n", settings.whitelist_port);
+  FILE *whitelist = fopen(settings.whitelist_port, "r");
   if (whitelist == NULL) {
     fprintf(stderr, "Error opening whitelist file '%s':\n\t%s\n",
-          settings.whitelist, strerror(errno));
+          settings.whitelist_port, strerror(errno));
     return -1;
   }
 
@@ -369,7 +378,7 @@ int load_whitelist() {
 
   if (tpcount == 0) {
       fprintf(stderr, "0 ports read from whitelist file '%s'\n",
-                      settings.whitelist);
+                      settings.whitelist_port);
       return -4;
   }
 
@@ -382,17 +391,74 @@ int load_whitelist() {
   return 0;
 }
 
+int load_whitelist_host() {
+  printf("loading host whitelist '%s'\n", settings.whitelist_host);
+  FILE *whitelist = fopen(settings.whitelist_host, "r");
+  if (whitelist == NULL) {
+    fprintf(stderr, "Error opening whitelist file '%s':\n\t%s\n",
+          settings.whitelist_host, strerror(errno));
+    return -1;
+  }
+
+  const int tplen_grow = 512;
+  int tplen = tplen_grow, tpcount = 0;
+  target_hosts = (int*)malloc(tplen*sizeof(int));
+  if (target_hosts == NULL) {
+    fprintf(stderr, "Whitelist port malloc error");
+    return -2;
+  }
+
+  char *line = NULL;
+  ssize_t n = 0, nread = 0;
+  while ((nread = getline(&line, &n, whitelist)) > 0) {
+      if (line[0] == '\n') continue;
+      line[nread-1] = '\x00';
+      int host;
+      
+      if (resolve_host(&host, line) < -1 ) {
+          fprintf(stderr,
+            "Whitelist host '%s': failed to resolve\n", line);
+          //return -3;
+          continue;
+      }
+      tpcount++;
+      if (tpcount >= tplen) {
+          tplen += tplen_grow;
+          target_hosts = (int*)realloc(target_hosts, tplen*sizeof(int));
+          if (target_hosts == NULL) {
+              fprintf(stderr, "Whitelist port realloc error\n");
+              return -2;
+          }
+      }
+      target_hosts[tpcount-1] = host;
+  }
+  if (line != NULL) free(line);
+
+  if (tpcount == 0) {
+      fprintf(stderr, "0 ports read from whitelist file '%s'\n",
+                      settings.whitelist_port);
+      return -4;
+  }
+
+  target_hosts = (int*)realloc(target_hosts, (tpcount + 1)*sizeof(int));
+  if (target_hosts == NULL) {
+      fprintf(stderr, "Whitelist port realloc error\n");
+      return -2;
+  }
+  target_hosts[tpcount] = 0;
+  return 0;
+}
+
 int main(int argc, char *argv[])
 {
     int fd, c, option_index = 0;
     char *found;
     static struct option long_options[] = {
         {"verbose",   no_argument,       0,                 'v'},
-        {"daemon",    no_argument,       0,                 'D'},
+        {"daemon",    no_argument,       0,                 'd'},
         /* ---- */
-        {"run-once",  no_argument,       0,                 'r'},
-        {"whitelist", required_argument, 0,                 'w'},
-        {"pattern",   required_argument, 0,                 'P'},
+        {"whitelist-ports", required_argument, 0,           'P'},
+        {"whitelist-hosts", required_argument, 0,           'W'},
         {"pid",       required_argument, 0,                 'p'},
         {0, 0, 0, 0}
     };
@@ -401,7 +467,7 @@ int main(int argc, char *argv[])
     settings.pid = "/var/run/websockify.pid";
 
     while (1) {
-        c = getopt_long (argc, argv, "vDrc:k:w:p:P:",
+        c = getopt_long (argc, argv, "vdW:p:P:",
                          long_options, &option_index);
 
         /* Detect the end */
@@ -418,17 +484,17 @@ int main(int argc, char *argv[])
             case 'D':
                 settings.daemon = 1;
                 break;
-            case 'r':
-                settings.run_once = 1;
-                break;
-            case 'w':
-                settings.whitelist = realpath(optarg, NULL);
-                if (! settings.whitelist) {
+            case 'W':
+                settings.whitelist_host = realpath(optarg, NULL);
+                if (! settings.whitelist_host) {
                     usage("No whitelist file at %s\n", optarg);
                 }
                 break;
             case 'P':
-                settings.pattern = optarg;
+                settings.whitelist_port = realpath(optarg, NULL);
+                if (! settings.whitelist_port) {
+                    usage("No whitelist file at %s\n", optarg);
+                }
                 break;
             case 'p':
                 settings.pid = optarg;
@@ -438,7 +504,7 @@ int main(int argc, char *argv[])
         }
     }
 
-    if ((argc-optind) != 2) {
+    if ((argc-optind) != 1) {
         usage("Invalid number of arguments\n");
     }
 
@@ -455,25 +521,20 @@ int main(int argc, char *argv[])
         usage("Could not parse listen_port\n");
     }
 
-    found = strstr(argv[optind], ":");
-    if (found && settings.whitelist == NULL) {
-        memcpy(target_host, argv[optind], found-argv[optind]);
-        target_port = strtol(found+1, NULL, 10);
-        target_ports = NULL;
-    } else if (!found && settings.whitelist != NULL) {
-        if (load_whitelist()) {
-          usage("Whitelist error.");
+    if (!found && settings.whitelist_host != NULL) {
+        if (load_whitelist_host()) {
+          usage("Whitelist hosts error.");
         }
-        memcpy(target_host, argv[optind], strlen(argv[optind]));
-        target_port = -1;
 
-    } else {
-        usage("Target argument must be host:port or provide host and a port whitelist\n");
-    }
-    if (target_port == 0) {
-        usage("Could not parse target port\n");
     }
 
+    if (!found && settings.whitelist_port != NULL) {
+        if (load_whitelist_port()) {
+          usage("Whitelist ports error.");
+        }
+
+    }
+    
     //printf("  verbose: %d\n",   settings.verbose);
     //printf("  daemon: %d\n",    settings.daemon);
     //printf("  run_once: %d\n",  settings.run_once);
