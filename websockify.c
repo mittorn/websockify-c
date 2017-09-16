@@ -32,7 +32,7 @@ Traffic Legend:\n\
     <. - Client send partial\n\
 ";
 
-char USAGE[] = "Usage: [options] " \
+char USAGE[] = "Usage: wsproxy [options] " \
                "[source_addr:]source_port\n\n" \
                "  --verbose|-v         verbose messages and per frame traffic\n" \
                "  --daemon|-d          become a daemon (background process)\n" \

@@ -1,9 +1,9 @@
-TARGETS=websockify
+TARGETS=wsproxy
 CFLAGS += -fPIC
 
 all: $(TARGETS)
 
-websockify: websockify.o websocket.o base64.o md5.o sha1.o
+wsproxy: websockify.o websocket.o base64.o md5.o sha1.o
 	$(CC) $(LDFLAGS) $^ -o $@
 
 websocket.o: websocket.c websocket.h
@@ -13,5 +13,5 @@ sha1.o: sha1.c sha1.h
 base64.o: base64.c
 
 clean:
-	rm -f websockify *.o
+	rm -f wsproxy *.o
 
