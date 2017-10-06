@@ -481,7 +481,7 @@ int main(int argc, char *argv[])
             case 'v':
                 settings.verbose = 1;
                 break;
-            case 'D':
+            case 'd':
                 settings.daemon = 1;
                 break;
             case 'W':
