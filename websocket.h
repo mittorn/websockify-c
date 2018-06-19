@@ -9,6 +9,7 @@ Connection: Upgrade\r\n\
 %sWebSocket-Origin: %s\r\n\
 %sWebSocket-Location: %s://%s%s\r\n\
 %sWebSocket-Protocol: %s\r\n\
+Access-Control-Allow-Origin: *\r\n\
 \r\n%s"
 
 #define SERVER_HANDSHAKE_HYBI "HTTP/1.1 101 Switching Protocols\r\n\
@@ -16,6 +17,7 @@ Upgrade: websocket\r\n\
 Connection: Upgrade\r\n\
 Sec-WebSocket-Accept: %s\r\n\
 Sec-WebSocket-Protocol: %s\r\n\
+Access-Control-Allow-Origin: *\r\n\
 \r\n"
 
 #define HYBI_GUID "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"

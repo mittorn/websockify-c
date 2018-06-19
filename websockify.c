@@ -199,12 +199,12 @@ void do_proxy(ws_ctx_t *ws_ctx, int target) {
                 len = decode_hybi(ws_ctx->tin_buf + tin_start,
                                   tin_end-tin_start,
                                   ws_ctx->tout_buf, BUFSIZE-1,
-                                  &opcode, &left);
+                                  &opcode, &left, ws_ctx->udp);
             } else {
                 len = decode_hixie(ws_ctx->tin_buf + tin_start,
                                    tin_end-tin_start,
                                    ws_ctx->tout_buf, BUFSIZE-1,
-                                   &opcode, &left);
+                                   &opcode, &left, ws_ctx->udp);
             }
 
             if (opcode == 8) {

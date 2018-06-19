@@ -142,7 +142,7 @@ int encode_hixie(u_char const *src, size_t srclength,
 
 int decode_hixie(char *src, size_t srclength,
                  u_char *target, size_t targsize,
-                 unsigned int *opcode, unsigned int *left) {
+                 unsigned int *opcode, unsigned int *left, int drop_merged) {
     char *start, *end, cntstr[4];
     int i, len, framecount = 0, retlen = 0;
     unsigned char chr;
@@ -177,6 +177,11 @@ int decode_hixie(char *src, size_t srclength,
     if (framecount > 1) {
         snprintf(cntstr, 3, "%d", framecount);
         traffic(cntstr);
+        if( drop_merged )
+        {
+            *left = 0;
+            return 0;
+        }
     }
     *left = 0;
     return retlen;
@@ -235,7 +240,7 @@ int encode_hybi(u_char const *src, size_t srclength,
 
 int decode_hybi(unsigned char *src, size_t srclength,
                 u_char *target, size_t targsize,
-                unsigned int *opcode, unsigned int *left)
+                unsigned int *opcode, unsigned int *left, int drop_merged)
 {
     unsigned char *frame, *mask, *payload, save_char, cntstr[4];;
     int masked = 0;
@@ -345,6 +350,12 @@ int decode_hybi(unsigned char *src, size_t srclength,
     if (framecount > 1) {
         snprintf(cntstr, 3, "%d", framecount);
         traffic(cntstr);
+        // hack: udp does not allow frame merging
+        // drop packets merged due delay
+        if( drop_merged ) {
+            *left = remaining;
+            return 0;
+        }
     }
     
     *left = remaining;
@@ -710,6 +721,8 @@ void start_server() {
                        &clilen);
         if (csock < 0) {
             error("ERROR on accept");
+            if( errno == EMFILE )
+                exit(1);
             continue;
         }
         handler_msg("got client connection from %s\n",
@@ -744,6 +757,7 @@ void start_server() {
             break;   // Child process exits
         } else {         // parent process
             settings.handler_id += 1;
+            close( csock );
         }
     }
     if (pid == 0) {
